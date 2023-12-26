@@ -1,4 +1,3 @@
-import subprocess
 from prefect import flow,task
 import zipfile
 import pandas as pd
@@ -6,6 +5,7 @@ from sklearn.preprocessing import OrdinalEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn import metrics
+from sklearn.model_selection import GridSearchCV
 
 
 @task
@@ -18,7 +18,6 @@ def get_data():
 
 @task
 def load_pd_process():
-    # Load train and test datasets
     df_train = pd.read_csv("spaceship-titanic/train.csv")
     df_test = pd.read_csv("spaceship-titanic/test.csv")
     df_train = df_train.drop(['PassengerId', 'Name'], axis=1)
@@ -64,20 +63,44 @@ def load_pd_process():
     return df_train, df_test
 
 @task
-def training(df_train,df_test):
+def training(df_train, df_test):
     X_train, X_test, y_train, y_test = train_test_split(df_train.drop("Transported", axis=1), df_train["Transported"], test_size=0.2, random_state=42)
-    clf = RandomForestClassifier(max_depth=700, random_state=0)
-    clf.fit (X_train, y_train)
-    y_pred = clf.predict(X_test)
-    print("Accuracy:",metrics.accuracy_score(y_test, y_pred))
+    
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [None, 10, 20, 30]  
 
+    }
+    
+
+    clf = RandomForestClassifier(random_state=0)
+    
+
+    grid_search = GridSearchCV(estimator=clf, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    best_clf = grid_search.best_estimator_
+    y_pred = best_clf.predict(X_test)
+
+    accuracy = metrics.accuracy_score(y_test, y_pred)
+    print("Best Parameters:", grid_search.best_params_)
+    print("Accuracy:", accuracy)
+    return X_train,X_test,y_train,y_test
+
+@task
+def save_data(X_train,X_test,y_train,y_test):
+    X_train.to_csv('X_train.csv', index=False)
+    X_test.to_csv('X_test.csv', index=False)
+    y_train.to_csv('y_train.csv', index=False)
+    y_test.to_csv('y_test.csv', index=False)
 
 @flow(log_prints=True)
 def hello_world(name: str = "world", goodbye: bool = False):
     print(f"Hello {name} from Prefect! 🤗")
     get_data()
     df_train,df_test = load_pd_process()
-    training(df_train,df_test)
+    X_train,X_test,y_train,y_test = training(df_train,df_test)
+    save_data(X_train,X_test,y_train,y_test)
 
 if __name__ == "__main__":
     hello_world.serve(name="my-first-deployment",
